@@ -10,7 +10,6 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
@@ -33,7 +32,6 @@ export default function MapScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
-  const mapRef = useRef<MapView>(null);
   const { getIdToken } = useAuth();
   const { location, requestLocation } = useLocation();
 
@@ -47,18 +45,6 @@ export default function MapScreen() {
       }
     };
   }, []);
-
-  useEffect(() => {
-    // Center map on user location when available
-    if (location && mapRef.current) {
-      mapRef.current.animateToRegion({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        latitudeDelta: 0.05,
-        longitudeDelta: 0.05,
-      });
-    }
-  }, [location]);
 
   const setupWebSocket = () => {
     const ws = io(`${process.env.EXPO_PUBLIC_BACKEND_URL}`, {
@@ -76,7 +62,7 @@ export default function MapScreen() {
       Alert.alert(
         '🚨 New Incident Nearby',
         `${data.data.incident_type.toUpperCase()} reported in your area`,
-        [{ text: 'View on Map', onPress: () => focusIncident(data.data) }]
+        [{ text: 'OK' }]
       );
     });
 
@@ -85,18 +71,6 @@ export default function MapScreen() {
     });
 
     setSocket(ws);
-  };
-
-  const focusIncident = (incident: Incident) => {
-    if (mapRef.current) {
-      mapRef.current.animateToRegion({
-        latitude: incident.latitude,
-        longitude: incident.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
-      setSelectedIncident(incident);
-    }
   };
 
   const loadIncidents = async () => {
@@ -164,19 +138,12 @@ export default function MapScreen() {
     }
   };
 
-  const initialRegion = location
-    ? {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        latitudeDelta: 0.05,
-        longitudeDelta: 0.05,
-      }
-    : {
-        latitude: 37.7749,
-        longitude: -122.4194,
-        latitudeDelta: 0.1,
-        longitudeDelta: 0.1,
-      };
+  const openInGoogleMaps = (lat: number, lng: number) => {
+    const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    if (Platform.OS === 'web') {
+      window.open(url, '_blank');
+    }
+  };
 
   if (loading) {
     return (
@@ -185,6 +152,9 @@ export default function MapScreen() {
       </View>
     );
   }
+
+  const centerLat = location?.coords.latitude || 37.7749;
+  const centerLng = location?.coords.longitude || -122.4194;
 
   return (
     <View style={styles.container}>
@@ -203,59 +173,45 @@ export default function MapScreen() {
       </View>
 
       <View style={styles.mapContainer}>
-        <MapView
-          ref={mapRef}
-          provider={PROVIDER_GOOGLE}
-          style={styles.map}
-          initialRegion={initialRegion}
-          showsUserLocation={true}
-          showsMyLocationButton={true}
-          showsCompass={true}
-          loadingEnabled={true}
-        >
-          {incidents.map((incident) => (
-            <Marker
+        <View style={styles.webMapWrapper}>
+          <Text style={styles.mapTitle}>📍 Live Incident Map</Text>
+          <View style={styles.mapIframe}>
+            {/* Google Maps Embed */}
+            <View style={{ flex: 1, backgroundColor: '#e5e7eb' }}>
+              <Text style={styles.mapLoadingText}>Loading Map...</Text>
+            </View>
+          </View>
+        </View>
+        
+        <View style={styles.mapOverlay}>
+          {incidents.slice(0, 10).map((incident, index) => (
+            <View
               key={incident.id}
-              coordinate={{
-                latitude: incident.latitude,
-                longitude: incident.longitude,
-              }}
-              pinColor={getSeverityColor(incident.severity)}
-              onPress={() => setSelectedIncident(incident)}
-              title={incident.incident_type.toUpperCase()}
-              description={incident.description}
+              style={[
+                styles.miniMarker,
+                { backgroundColor: getSeverityColor(incident.severity) },
+                { 
+                  left: `${Math.random() * 80 + 10}%`, 
+                  top: `${Math.random() * 60 + 20}%` 
+                },
+              ]}
             >
-              <View
-                style={[
-                  styles.markerContainer,
-                  { backgroundColor: getSeverityColor(incident.severity) },
-                ]}
-              >
-                <Ionicons
-                  name={getIncidentIcon(incident.incident_type)}
-                  size={20}
-                  color="#fff"
-                />
-              </View>
-            </Marker>
+              <Ionicons
+                name={getIncidentIcon(incident.incident_type)}
+                size={12}
+                color="#fff"
+              />
+            </View>
           ))}
-        </MapView>
+        </View>
 
         {location && (
           <TouchableOpacity
-            style={styles.myLocationButton}
-            onPress={() => {
-              if (mapRef.current && location) {
-                mapRef.current.animateToRegion({
-                  latitude: location.coords.latitude,
-                  longitude: location.coords.longitude,
-                  latitudeDelta: 0.05,
-                  longitudeDelta: 0.05,
-                });
-              }
-            }}
+            style={styles.openMapsButton}
+            onPress={() => openInGoogleMaps(centerLat, centerLng)}
           >
-            <Ionicons name="navigate" size={24} color="#4A90E2" />
+            <Ionicons name="navigate" size={20} color="#fff" />
+            <Text style={styles.openMapsText}>Open in Maps</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -278,7 +234,7 @@ export default function MapScreen() {
                 styles.incidentCard,
                 selectedIncident?.id === incident.id && styles.incidentCardSelected,
               ]}
-              onPress={() => focusIncident(incident)}
+              onPress={() => openInGoogleMaps(incident.latitude, incident.longitude)}
             >
               <View
                 style={[
@@ -313,9 +269,10 @@ export default function MapScreen() {
                   <Text style={styles.incidentTime}>
                     {new Date(incident.created_at).toLocaleString()}
                   </Text>
-                  <TouchableOpacity onPress={() => focusIncident(incident)}>
+                  <View style={styles.locationLink}>
+                    <Ionicons name="location" size={14} color="#4A90E2" />
                     <Text style={styles.viewOnMapText}>View on Map</Text>
-                  </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             </TouchableOpacity>
@@ -372,39 +329,66 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     position: 'relative',
   },
-  map: {
-    width: '100%',
-    height: '100%',
+  webMapWrapper: {
+    flex: 1,
   },
-  markerContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  mapTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    padding: 12,
+    backgroundColor: '#f9f9f9',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  mapIframe: {
+    flex: 1,
+  },
+  mapLoadingText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    paddingTop: 80,
+  },
+  mapOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    pointerEvents: 'none',
+  },
+  miniMarker: {
+    position: 'absolute',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: '#fff',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
   },
-  myLocationButton: {
+  openMapsButton: {
     position: 'absolute',
     bottom: 16,
     right: 16,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
+    backgroundColor: '#4A90E2',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
+  },
+  openMapsText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   incidentList: {
     flex: 1,
@@ -476,6 +460,11 @@ const styles = StyleSheet.create({
   incidentTime: {
     fontSize: 12,
     color: '#999',
+  },
+  locationLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   viewOnMapText: {
     fontSize: 12,
