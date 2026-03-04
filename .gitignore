@@ -88,4 +88,7 @@ Thumbs.db
 
 # Local configuration
 config.local.json
-secrets.json
+secrets.json-e 
+# Environment files
+*.env
+*.env.*
