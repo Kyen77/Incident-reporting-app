@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,9 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
@@ -30,6 +32,8 @@ export default function MapScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const mapRef = useRef<MapView>(null);
   const { getIdToken } = useAuth();
   const { location, requestLocation } = useLocation();
 
@@ -43,6 +47,18 @@ export default function MapScreen() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    // Center map on user location when available
+    if (location && mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      });
+    }
+  }, [location]);
 
   const setupWebSocket = () => {
     const ws = io(`${process.env.EXPO_PUBLIC_BACKEND_URL}`, {
@@ -58,9 +74,9 @@ export default function MapScreen() {
       console.log('New incident received:', data);
       setIncidents((prev) => [data.data, ...prev]);
       Alert.alert(
-        'New Incident Nearby',
-        `${data.data.incident_type} reported in your area`,
-        [{ text: 'OK' }]
+        '🚨 New Incident Nearby',
+        `${data.data.incident_type.toUpperCase()} reported in your area`,
+        [{ text: 'View on Map', onPress: () => focusIncident(data.data) }]
       );
     });
 
@@ -69,6 +85,18 @@ export default function MapScreen() {
     });
 
     setSocket(ws);
+  };
+
+  const focusIncident = (incident: Incident) => {
+    if (mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: incident.latitude,
+        longitude: incident.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      });
+      setSelectedIncident(incident);
+    }
   };
 
   const loadIncidents = async () => {
@@ -119,7 +147,7 @@ export default function MapScreen() {
     }
   };
 
-  const getIncidentIcon = (type: string) => {
+  const getIncidentIcon = (type: string): any => {
     switch (type) {
       case 'theft':
         return 'bag-remove';
@@ -135,6 +163,20 @@ export default function MapScreen() {
         return 'alert-circle';
     }
   };
+
+  const initialRegion = location
+    ? {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      }
+    : {
+        latitude: 37.7749,
+        longitude: -122.4194,
+        latitudeDelta: 0.1,
+        longitudeDelta: 0.1,
+      };
 
   if (loading) {
     return (
@@ -160,32 +202,62 @@ export default function MapScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.mockMapContainer}>
-        <View style={styles.mockMap}>
-          <Ionicons name="map-outline" size={64} color="#ccc" />
-          <Text style={styles.mockMapText}>Google Maps Integration</Text>
-          <Text style={styles.mockMapSubtext}>
-            Map will display here once Google Maps API key is added
-          </Text>
-          <View style={styles.mockMarkers}>
-            {incidents.slice(0, 5).map((incident, index) => (
+      <View style={styles.mapContainer}>
+        <MapView
+          ref={mapRef}
+          provider={PROVIDER_GOOGLE}
+          style={styles.map}
+          initialRegion={initialRegion}
+          showsUserLocation={true}
+          showsMyLocationButton={true}
+          showsCompass={true}
+          loadingEnabled={true}
+        >
+          {incidents.map((incident) => (
+            <Marker
+              key={incident.id}
+              coordinate={{
+                latitude: incident.latitude,
+                longitude: incident.longitude,
+              }}
+              pinColor={getSeverityColor(incident.severity)}
+              onPress={() => setSelectedIncident(incident)}
+              title={incident.incident_type.toUpperCase()}
+              description={incident.description}
+            >
               <View
-                key={incident.id}
                 style={[
-                  styles.mockMarker,
+                  styles.markerContainer,
                   { backgroundColor: getSeverityColor(incident.severity) },
-                  { left: `${20 + index * 15}%`, top: `${30 + index * 10}%` },
                 ]}
               >
                 <Ionicons
-                  name={getIncidentIcon(incident.incident_type) as any}
-                  size={16}
+                  name={getIncidentIcon(incident.incident_type)}
+                  size={20}
                   color="#fff"
                 />
               </View>
-            ))}
-          </View>
-        </View>
+            </Marker>
+          ))}
+        </MapView>
+
+        {location && (
+          <TouchableOpacity
+            style={styles.myLocationButton}
+            onPress={() => {
+              if (mapRef.current && location) {
+                mapRef.current.animateToRegion({
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                  latitudeDelta: 0.05,
+                  longitudeDelta: 0.05,
+                });
+              }
+            }}
+          >
+            <Ionicons name="navigate" size={24} color="#4A90E2" />
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
@@ -200,7 +272,14 @@ export default function MapScreen() {
           </View>
         ) : (
           incidents.map((incident) => (
-            <View key={incident.id} style={styles.incidentCard}>
+            <TouchableOpacity
+              key={incident.id}
+              style={[
+                styles.incidentCard,
+                selectedIncident?.id === incident.id && styles.incidentCardSelected,
+              ]}
+              onPress={() => focusIncident(incident)}
+            >
               <View
                 style={[
                   styles.incidentIconContainer,
@@ -208,7 +287,7 @@ export default function MapScreen() {
                 ]}
               >
                 <Ionicons
-                  name={getIncidentIcon(incident.incident_type) as any}
+                  name={getIncidentIcon(incident.incident_type)}
                   size={24}
                   color="#fff"
                 />
@@ -230,11 +309,16 @@ export default function MapScreen() {
                 <Text style={styles.incidentDescription} numberOfLines={2}>
                   {incident.description}
                 </Text>
-                <Text style={styles.incidentTime}>
-                  {new Date(incident.created_at).toLocaleString()}
-                </Text>
+                <View style={styles.incidentFooter}>
+                  <Text style={styles.incidentTime}>
+                    {new Date(incident.created_at).toLocaleString()}
+                  </Text>
+                  <TouchableOpacity onPress={() => focusIncident(incident)}>
+                    <Text style={styles.viewOnMapText}>View on Map</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            </TouchableOpacity>
           ))
         )}
       </ScrollView>
@@ -275,8 +359,8 @@ const styles = StyleSheet.create({
   refreshButton: {
     padding: 8,
   },
-  mockMapContainer: {
-    height: 250,
+  mapContainer: {
+    height: 300,
     backgroundColor: '#fff',
     margin: 16,
     borderRadius: 12,
@@ -286,43 +370,40 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-  },
-  mockMap: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f9f9f9',
     position: 'relative',
   },
-  mockMapText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#999',
-    marginTop: 8,
-  },
-  mockMapSubtext: {
-    fontSize: 12,
-    color: '#bbb',
-    marginTop: 4,
-    textAlign: 'center',
-    paddingHorizontal: 32,
-  },
-  mockMarkers: {
-    position: 'absolute',
+  map: {
     width: '100%',
     height: '100%',
   },
-  mockMarker: {
-    position: 'absolute',
+  markerContainer: {
     width: 40,
     height: 40,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 4,
+    borderWidth: 3,
+    borderColor: '#fff',
+    elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  myLocationButton: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
     shadowRadius: 3,
   },
   incidentList: {
@@ -346,6 +427,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
+  },
+  incidentCardSelected: {
+    borderWidth: 2,
+    borderColor: '#4A90E2',
   },
   incidentIconContainer: {
     width: 48,
@@ -381,11 +466,21 @@ const styles = StyleSheet.create({
   incidentDescription: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 4,
+    marginBottom: 8,
+  },
+  incidentFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   incidentTime: {
     fontSize: 12,
     color: '#999',
+  },
+  viewOnMapText: {
+    fontSize: 12,
+    color: '#4A90E2',
+    fontWeight: '600',
   },
   emptyState: {
     alignItems: 'center',
