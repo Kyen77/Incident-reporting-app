@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
-import { io, Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
 
 interface Incident {
   id: string;
@@ -30,23 +30,47 @@ export default function MapScreen() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const { getIdToken } = useAuth();
+
+  // To avoid unused variable warning, define a function to select an incident
+  const handleSelectIncident = (incident: Incident) => {
+    setSelectedIncident(incident);
+    openInGoogleMaps(incident.latitude, incident.longitude);
+  };
   const { location, requestLocation } = useLocation();
 
   useEffect(() => {
-    loadIncidents();
-    setupWebSocket();
+    const fetchIncidents = async (showLoading = true) => {
+      try {
+        if (showLoading) setLoading(true);
+        const token = await getIdToken();
 
-    return () => {
-      if (socket) {
-        socket.disconnect();
+        const url = location
+          ? `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=10000`
+          : `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents`;
+
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setIncidents(data);
+        }
+      } catch (error) {
+        console.error('Error loading incidents:', error);
+      } finally {
+        if (showLoading) setLoading(false);
       }
     };
-  }, []);
 
-  const setupWebSocket = () => {
+    fetchIncidents();
+  }, [location, getIdToken]);
+
+  useEffect(() => {
     const ws = io(`${process.env.EXPO_PUBLIC_BACKEND_URL}`, {
       path: '/api/ws',
       transports: ['websocket'],
@@ -70,22 +94,21 @@ export default function MapScreen() {
       console.log('WebSocket disconnected');
     });
 
-    setSocket(ws);
-  };
+    return () => {
+      ws.disconnect();
+    };
+  }, []); // Only setup websocket once
 
-  const loadIncidents = async () => {
+  const onRefresh = async () => {
+    setRefreshing(true);
     try {
-      setLoading(true);
       const token = await getIdToken();
-
       const url = location
         ? `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=10000`
         : `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents`;
 
       const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (response.ok) {
@@ -94,14 +117,7 @@ export default function MapScreen() {
       }
     } catch (error) {
       console.error('Error loading incidents:', error);
-    } finally {
-      setLoading(false);
     }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadIncidents();
     await requestLocation();
     setRefreshing(false);
   };
@@ -234,7 +250,7 @@ export default function MapScreen() {
                 styles.incidentCard,
                 selectedIncident?.id === incident.id && styles.incidentCardSelected,
               ]}
-              onPress={() => openInGoogleMaps(incident.latitude, incident.longitude)}
+              onPress={() => handleSelectIncident(incident)}
             >
               <View
                 style={[

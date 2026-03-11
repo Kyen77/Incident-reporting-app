@@ -14,7 +14,7 @@ import sys
 import os
 
 # Backend URL from frontend .env
-BACKEND_URL = "https://safety-hotspots.preview.emergentagent.com/api"
+BACKEND_URL = "http://localhost:8001/api"
 
 class ShieldNetAPITester:
     def __init__(self):
