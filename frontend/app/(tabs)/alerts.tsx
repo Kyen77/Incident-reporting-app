@@ -6,13 +6,12 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
-  TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
 
 interface Incident {
   id: string;
@@ -41,78 +40,15 @@ export default function AlertsScreen() {
   const { getIdToken } = useAuth();
   const { location } = useLocation();
 
-  useEffect(() => {
-    setupNotifications();
-    loadNearbyIncidents();
 
-    // Listen for notifications
-    const subscription = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('Notification received:', notification);
-      loadNearbyIncidents();
-    });
-
-    return () => subscription.remove();
-  }, [location]);
-
-  const setupNotifications = async () => {
-    try {
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
-
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
-      }
-
-      if (finalStatus !== 'granted') {
-        console.log('Notification permission denied');
-        return;
-      }
-
-      // Get Expo push token
-      const token = (await Notifications.getExpoPushTokenAsync()).data;
-      setNotificationToken(token);
-      console.log('Expo Push Token:', token);
-
-      // Send token to backend
-      if (location) {
-        const authToken = await getIdToken();
-        await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/user/location`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${authToken}`,
-          },
-          body: JSON.stringify({
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-            fcm_token: token,
-          }),
-        });
-      }
-
-      // Configure notification channel for Android
-      if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('default', {
-          name: 'default',
-          importance: Notifications.AndroidImportance.MAX,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#FF231F7C',
-        });
-      }
-    } catch (error) {
-      console.error('Error setting up notifications:', error);
-    }
-  };
-
-  const loadNearbyIncidents = async () => {
+  const fetchNearbyIncidentsFn = async (showLoading = true) => {
     if (!location) {
-      setLoading(false);
+      if (showLoading) setLoading(false);
       return;
     }
 
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       const token = await getIdToken();
 
       const response = await fetch(
@@ -131,13 +67,107 @@ export default function AlertsScreen() {
     } catch (error) {
       console.error('Error loading nearby incidents:', error);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
+  useEffect(() => {
+    const fetchNearbyIncidents = async (showLoading = true) => {
+      if (!location) {
+        if (showLoading) setLoading(false);
+        return;
+      }
+
+      try {
+        if (showLoading) setLoading(true);
+        const token = await getIdToken();
+
+        const response = await fetch(
+          `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents/nearby?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=5000`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          setNearbyIncidents(data);
+        }
+      } catch (error) {
+        console.error('Error loading nearby incidents:', error);
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    };
+
+    const setupNotifications = async () => {
+      try {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+
+        if (finalStatus !== 'granted') {
+          console.log('Notification permission denied');
+          return;
+        }
+
+        // Get Expo push token
+        const token = (await Notifications.getExpoPushTokenAsync()).data;
+        setNotificationToken(token);
+        console.log('Expo Push Token:', token);
+
+        // Send token to backend
+        if (location) {
+          const authToken = await getIdToken();
+          await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/user/location`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              fcm_token: token,
+            }),
+          });
+        }
+
+        // Configure notification channel for Android
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('default', {
+            name: 'default',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: '#FF231F7C',
+          });
+        }
+      } catch (error) {
+        console.error('Error setting up notifications:', error);
+      }
+    };
+
+    setupNotifications();
+    fetchNearbyIncidents();
+
+    // Listen for notifications
+    const subscription = Notifications.addNotificationReceivedListener((notification) => {
+      console.log('Notification received:', notification);
+      fetchNearbyIncidents();
+    });
+
+    return () => subscription.remove();
+  }, [location, getIdToken]);
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadNearbyIncidents();
+    await fetchNearbyIncidentsFn(false);
     setRefreshing(false);
   };
 
