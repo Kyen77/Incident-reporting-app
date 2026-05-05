@@ -1,5 +1,5 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
-import { initializeApp } from 'firebase/app';
+import React, { createContext, useState, useEffect, useContext } from "react";
+import { initializeApp } from "firebase/app";
 import {
   getAuth,
   createUserWithEmailAndPassword,
@@ -8,9 +8,10 @@ import {
   onAuthStateChanged,
   User,
   GoogleAuthProvider,
-  signInWithPopup
-} from 'firebase/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+  signInWithPopup,
+} from "firebase/auth";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { loginUser, registerUser } from "../services/api";
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -27,7 +28,11 @@ const auth = getAuth(app);
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signUp: (email: string, password: string, displayName: string) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    displayName: string,
+  ) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
@@ -36,7 +41,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -48,13 +55,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (currentUser) {
         try {
           const token = await currentUser.getIdToken();
-          await AsyncStorage.setItem('authToken', token);
-          await registerUserInBackend(currentUser);
+          await AsyncStorage.setItem("authToken", token);
+          await loginUser(token);
         } catch (error) {
-          console.error('Error storing auth token:', error);
+          console.error("Error storing auth token:", error);
         }
       } else {
-        await AsyncStorage.removeItem('authToken');
+        await AsyncStorage.removeItem("authToken");
       }
     });
 
@@ -63,29 +70,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const registerUserInBackend = async (firebaseUser: User) => {
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          firebase_uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          display_name: firebaseUser.displayName,
-        }),
+      const response = await registerUser({
+        firebase_uid: firebaseUser.uid,
+        email: firebaseUser.email,
+        display_name: firebaseUser.displayName,
       });
 
       if (!response.ok) {
-        console.error('Failed to register user in backend');
+        console.error("Failed to register user in backend");
       }
     } catch (error) {
-      console.error('Error registering user:', error);
+      console.error("Error registering user:", error);
     }
   };
 
-  const signUp = async (email: string, password: string, displayName: string) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    displayName: string,
+  ) => {
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
       await registerUserInBackend(userCredential.user);
     } catch (error: any) {
       throw new Error(error.message);
@@ -94,7 +103,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signIn = async (email: string, password: string) => {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
+      const token = await userCredential.user.getIdToken();
+      await loginUser(token);
     } catch (error: any) {
       throw new Error(error.message);
     }
@@ -112,7 +127,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       await signOut(auth);
-      await AsyncStorage.removeItem('authToken');
+      await AsyncStorage.removeItem("authToken");
     } catch (error: any) {
       throw new Error(error.message);
     }
@@ -145,7 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 };

@@ -13,6 +13,8 @@ import os
 import logging
 import json
 import asyncio
+from dotenv import load_dotenv
+load_dotenv()
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -97,6 +99,9 @@ class HotspotResponse(BaseModel):
     incident_types: List[str]
     severity_avg: str
 
+class TokenPayload(BaseModel):
+    id_token: str
+
 # Auth dependency
 async def get_current_user(authorization: str = Header(None)):
     if not authorization or not authorization.startswith('Bearer '):
@@ -139,6 +144,46 @@ async def register_user(user_data: UserCreate):
     except Exception as e:
         logging.error(f"Error registering user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/auth/login")
+async def login_user(token_data: TokenPayload):
+    """Verify a Firebase ID token and return a backend authorization payload."""
+    try:
+        decoded_token = auth.verify_id_token(token_data.id_token)
+    except Exception as e:
+        logging.error(f"Login token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or expired authentication token")
+
+    user = await db.users.find_one({"firebase_uid": decoded_token["uid"]})
+    if not user:
+        try:
+            firebase_user = auth.get_user(decoded_token["uid"])
+            user_doc = {
+                "firebase_uid": firebase_user.uid,
+                "email": firebase_user.email,
+                "display_name": firebase_user.display_name,
+                "fcm_token": None,
+                "location": None,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            result = await db.users.insert_one(user_doc)
+            user = user_doc
+            user["_id"] = result.inserted_id
+        except Exception as e:
+            logging.error(f"Error creating backend user on login: {e}")
+            raise HTTPException(status_code=500, detail="Failed to create backend user record")
+
+    return {
+        "message": "Login successful",
+        "authorization": f"Bearer {token_data.id_token}",
+        "token": token_data.id_token,
+        "user": {
+            "uid": decoded_token.get("uid"),
+            "email": decoded_token.get("email"),
+            "display_name": decoded_token.get("name") or decoded_token.get("displayName")
+        }
+    }
 
 @api_router.post("/user/location")
 async def update_user_location(location_data: UserLocation, current_user: dict = Depends(get_current_user)):
@@ -406,3 +451,12 @@ async def startup_event():
 async def shutdown_db_client():
     client.close()
     logger.info("Database connection closed")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8001, reload=True)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+    
+
