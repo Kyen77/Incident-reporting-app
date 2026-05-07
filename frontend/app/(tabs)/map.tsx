@@ -9,11 +9,12 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
-import { io } from 'socket.io-client';
+import { BACKEND_URL, reportEmergencyIncident } from '../../services/api';
 
 interface Incident {
   id: string;
@@ -31,12 +32,13 @@ export default function MapScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [sosSubmitting, setSosSubmitting] = useState(false);
   const { getIdToken } = useAuth();
 
   // To avoid unused variable warning, define a function to select an incident
   const handleSelectIncident = (incident: Incident) => {
     setSelectedIncident(incident);
-    openInGoogleMaps(incident.latitude, incident.longitude);
+    openInMaps(incident.latitude, incident.longitude);
   };
   const { location, requestLocation } = useLocation();
 
@@ -47,8 +49,8 @@ export default function MapScreen() {
         const token = await getIdToken();
 
         const url = location
-          ? `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=10000`
-          : `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents`;
+          ? `${BACKEND_URL}/api/incidents?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=10000`
+          : `${BACKEND_URL}/api/incidents`;
 
         const response = await fetch(url, {
           headers: {
@@ -71,32 +73,38 @@ export default function MapScreen() {
   }, [location, getIdToken]);
 
   useEffect(() => {
-    const ws = io(`${process.env.EXPO_PUBLIC_BACKEND_URL}`, {
-      path: '/api/ws',
-      transports: ['websocket'],
-    });
+    const wsBaseUrl = BACKEND_URL.replace(/^http/, 'ws');
+    const ws = new WebSocket(`${wsBaseUrl}/api/ws`);
 
-    ws.on('connect', () => {
-      console.log('WebSocket connected');
-    });
-
-    ws.on('new_incident', (data: any) => {
-      console.log('New incident received:', data);
-      setIncidents((prev) => [data.data, ...prev]);
-      Alert.alert(
-        '🚨 New Incident Nearby',
-        `${data.data.incident_type.toUpperCase()} reported in your area`,
-        [{ text: 'OK' }]
-      );
-    });
-
-    ws.on('disconnect', () => {
-      console.log('WebSocket disconnected');
-    });
-
-    return () => {
-      ws.disconnect();
+    ws.onopen = () => {
+      ws.send('client_connected');
     };
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.type === 'new_incident' && payload?.data) {
+          setIncidents((prev) => [payload.data, ...prev]);
+          Alert.alert(
+            '🚨 New Incident Nearby',
+            `${payload.data.incident_type.toUpperCase()} reported in your area`,
+            [{ text: 'OK' }]
+          );
+        }
+      } catch (error) {
+        console.warn('WebSocket message parse error:', error);
+      }
+    };
+
+    ws.onerror = (event) => {
+      console.warn('WebSocket error:', event);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+
+    return () => ws.close();
   }, []); // Only setup websocket once
 
   const onRefresh = async () => {
@@ -104,8 +112,8 @@ export default function MapScreen() {
     try {
       const token = await getIdToken();
       const url = location
-        ? `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=10000`
-        : `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents`;
+        ? `${BACKEND_URL}/api/incidents?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=10000`
+        : `${BACKEND_URL}/api/incidents`;
 
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
@@ -139,6 +147,8 @@ export default function MapScreen() {
 
   const getIncidentIcon = (type: string): any => {
     switch (type) {
+      case 'sos':
+        return 'alert-circle';
       case 'theft':
         return 'bag-remove';
       case 'fire':
@@ -154,11 +164,72 @@ export default function MapScreen() {
     }
   };
 
-  const openInGoogleMaps = (lat: number, lng: number) => {
-    const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-    if (Platform.OS === 'web') {
-      window.open(url, '_blank');
+  const openInMaps = async (lat: number, lng: number) => {
+    const url = Platform.OS === 'ios'
+      ? `http://maps.apple.com/?q=${lat},${lng}`
+      : `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+
+    const canOpen = await Linking.canOpenURL(url);
+    if (!canOpen) {
+      Alert.alert('Error', 'Unable to open maps on this device');
+      return;
     }
+
+    await Linking.openURL(url);
+  };
+
+  const sendEmergencyIncident = async () => {
+    if (sosSubmitting) return;
+
+    if (!location) {
+      Alert.alert('Location required', 'Enable location to send an SOS alert.');
+      await requestLocation();
+      return;
+    }
+
+    const token = await getIdToken();
+    if (!token) {
+      Alert.alert('Error', 'You must be signed in to send an SOS alert.');
+      return;
+    }
+
+    try {
+      setSosSubmitting(true);
+      const response = await reportEmergencyIncident(token, {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        description: 'Emergency SOS triggered',
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        Alert.alert(
+          'SOS Sent',
+          `Emergency alert sent. ${data.nearby_users_notified} nearby users notified.`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        const error = await response.json();
+        Alert.alert('Error', error.detail || 'Failed to send SOS alert');
+      }
+    } catch (error) {
+      console.error('Error sending SOS alert:', error);
+      Alert.alert('Error', 'Failed to send SOS alert. Please try again.');
+    } finally {
+      setSosSubmitting(false);
+    }
+  };
+
+  const handleSOSPress = () => {
+    if (sosSubmitting) return;
+    Alert.alert(
+      'Send SOS?',
+      'This will send a critical alert with your location to nearby users.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Send SOS', style: 'destructive', onPress: sendEmergencyIncident },
+      ]
+    );
   };
 
   if (loading) {
@@ -224,12 +295,29 @@ export default function MapScreen() {
         {location && (
           <TouchableOpacity
             style={styles.openMapsButton}
-            onPress={() => openInGoogleMaps(centerLat, centerLng)}
+            onPress={() => openInMaps(centerLat, centerLng)}
           >
             <Ionicons name="navigate" size={20} color="#fff" />
             <Text style={styles.openMapsText}>Open in Maps</Text>
           </TouchableOpacity>
         )}
+      </View>
+
+      <View style={styles.sosContainer} pointerEvents="box-none">
+        <TouchableOpacity
+          style={[styles.sosButton, sosSubmitting && styles.sosButtonDisabled]}
+          onPress={handleSOSPress}
+          disabled={sosSubmitting}
+        >
+          {sosSubmitting ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="radio-button-on" size={22} color="#fff" />
+              <Text style={styles.sosButtonText}>SOS</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -486,6 +574,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#4A90E2',
     fontWeight: '600',
+  },
+  sosContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 20,
+    alignItems: 'center',
+  },
+  sosButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#D32F2F',
+    borderRadius: 999,
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+  },
+  sosButtonDisabled: {
+    opacity: 0.6,
+  },
+  sosButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
   emptyState: {
     alignItems: 'center',

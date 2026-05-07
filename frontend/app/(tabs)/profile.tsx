@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
 import { useRouter } from 'expo-router';
+import { BACKEND_URL } from '../../services/api';
 
 interface Hotspot {
   latitude: number;
@@ -34,7 +35,7 @@ export default function ProfileScreen() {
   const loadHotspots = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/hotspots`);
+      const response = await fetch(`${BACKEND_URL}/api/hotspots`);
 
       if (response.ok) {
         const data = await response.json();

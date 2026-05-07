@@ -45,4 +45,16 @@ const get = async (endpoint, token) => {
   });
 };
 
-export { BACKEND_URL, registerUser, loginUser, post, get, authHeaders };
+const reportEmergencyIncident = async (token, data) => {
+  return post('/api/incidents/emergency', token, data);
+};
+
+export {
+  BACKEND_URL,
+  registerUser,
+  loginUser,
+  post,
+  get,
+  authHeaders,
+  reportEmergencyIncident,
+};

@@ -82,6 +82,11 @@ class IncidentCreate(BaseModel):
     longitude: float
     severity: str = "medium"  # low, medium, high, critical
 
+class EmergencyIncidentCreate(BaseModel):
+    latitude: float
+    longitude: float
+    description: Optional[str] = None
+
 class IncidentResponse(BaseModel):
     id: str
     user_id: str
@@ -245,9 +250,11 @@ async def create_incident(incident: IncidentCreate, current_user: dict = Depends
             "data": {
                 "id": incident_id,
                 "incident_type": incident.incident_type,
+                "description": incident.description,
                 "severity": incident.severity,
                 "latitude": incident.latitude,
                 "longitude": incident.longitude,
+                "status": "active",
                 "created_at": datetime.utcnow().isoformat()
             }
         })
@@ -278,6 +285,90 @@ async def create_incident(incident: IncidentCreate, current_user: dict = Depends
         }
     except Exception as e:
         logging.error(f"Error creating incident: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/incidents/emergency")
+async def create_emergency_incident(
+    emergency: EmergencyIncidentCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Create a critical SOS incident with minimal input"""
+    try:
+        user = await db.users.find_one({"firebase_uid": current_user["uid"]})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        description = (emergency.description or "Emergency SOS triggered").strip()
+        incident_payload = IncidentCreate(
+            incident_type="sos",
+            description=description,
+            latitude=emergency.latitude,
+            longitude=emergency.longitude,
+            severity="critical"
+        )
+
+        location_point = {
+            "type": "Point",
+            "coordinates": [incident_payload.longitude, incident_payload.latitude]
+        }
+
+        await db.users.update_one(
+            {"firebase_uid": current_user["uid"]},
+            {"$set": {"location": location_point, "updated_at": datetime.utcnow()}}
+        )
+
+        incident_dict = {
+            "user_id": current_user["uid"],
+            "incident_type": incident_payload.incident_type,
+            "description": incident_payload.description,
+            "location": location_point,
+            "severity": incident_payload.severity,
+            "status": "active",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+
+        result = await db.incidents.insert_one(incident_dict)
+        incident_id = str(result.inserted_id)
+
+        await manager.broadcast({
+            "type": "new_incident",
+            "data": {
+                "id": incident_id,
+                "incident_type": incident_payload.incident_type,
+                "description": incident_payload.description,
+                "severity": incident_payload.severity,
+                "latitude": incident_payload.latitude,
+                "longitude": incident_payload.longitude,
+                "status": "active",
+                "created_at": datetime.utcnow().isoformat()
+            }
+        })
+
+        nearby_users = await db.users.find({
+            "location": {
+                "$near": {
+                    "$geometry": {
+                        "type": "Point",
+                        "coordinates": [incident_payload.longitude, incident_payload.latitude]
+                    },
+                    "$maxDistance": 5000
+                }
+            },
+            "fcm_token": {"$exists": True, "$ne": None},
+            "firebase_uid": {"$ne": current_user["uid"]}
+        }).to_list(100)
+
+        if nearby_users:
+            asyncio.create_task(send_proximity_alerts(nearby_users, incident_payload))
+
+        return {
+            "message": "Emergency incident reported successfully",
+            "incident_id": incident_id,
+            "nearby_users_notified": len(nearby_users)
+        }
+    except Exception as e:
+        logging.error(f"Error creating emergency incident: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 async def send_proximity_alerts(users: List[dict], incident: IncidentCreate):
@@ -456,7 +547,4 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run("server:app", host="0.0.0.0", port=8001, reload=True)
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
-    
 

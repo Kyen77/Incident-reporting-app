@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
 import * as Notifications from 'expo-notifications';
+import { BACKEND_URL } from '../../services/api';
 
 interface Incident {
   id: string;
@@ -52,7 +53,7 @@ export default function AlertsScreen() {
       const token = await getIdToken();
 
       const response = await fetch(
-        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents/nearby?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=5000`,
+        `${BACKEND_URL}/api/incidents/nearby?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=5000`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -83,7 +84,7 @@ export default function AlertsScreen() {
         const token = await getIdToken();
 
         const response = await fetch(
-          `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents/nearby?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=5000`,
+          `${BACKEND_URL}/api/incidents/nearby?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=5000`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -125,7 +126,7 @@ export default function AlertsScreen() {
         // Send token to backend
         if (location) {
           const authToken = await getIdToken();
-          await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/user/location`, {
+          await fetch(`${BACKEND_URL}/api/user/location`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

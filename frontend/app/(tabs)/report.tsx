@@ -14,6 +14,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLocation } from "../../contexts/LocationContext";
+import { BACKEND_URL } from "../../services/api";
 
 const INCIDENT_TYPES = [
   {
@@ -76,7 +77,7 @@ export default function ReportScreen() {
       const token = await getIdToken();
 
       // Update user location first
-      await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/user/location`, {
+      await fetch(`${BACKEND_URL}/api/user/location`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -89,23 +90,20 @@ export default function ReportScreen() {
       });
 
       // Report incident
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/incidents`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            incident_type: selectedType,
-            description: description.trim(),
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-            severity,
-          }),
+      const response = await fetch(`${BACKEND_URL}/api/incidents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-      );
+        body: JSON.stringify({
+          incident_type: selectedType,
+          description: description.trim(),
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          severity,
+        }),
+      });
 
       if (response.ok) {
         const data = await response.json();
