@@ -12,13 +12,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
 import { useRouter } from 'expo-router';
-import { BACKEND_URL } from '../../services/api';
+import { getIncidents } from '../../services/api';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 interface Hotspot {
   latitude: number;
   longitude: number;
   count: number;
-  incident_types: string[];
+  incidentTypes: string[];
 }
 
 export default function ProfileScreen() {
@@ -29,18 +31,50 @@ export default function ProfileScreen() {
   const router = useRouter();
 
   useEffect(() => {
-    loadHotspots();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        loadHotspots();
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   const loadHotspots = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${BACKEND_URL}/api/hotspots`);
 
-      if (response.ok) {
-        const data = await response.json();
-        setHotspots(data);
-      }
+      const incidents = await getIncidents();
+      const groupedHotspots = new Map<string, Hotspot>();
+
+      incidents.forEach((incident: any) => {
+        const latitude = Number(incident.latitude);
+        const longitude = Number(incident.longitude);
+
+        if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+          return;
+        }
+
+        const roundedLatitude = Number(latitude.toFixed(2));
+        const roundedLongitude = Number(longitude.toFixed(2));
+        const key = `${roundedLatitude}:${roundedLongitude}`;
+
+        const incidentType = incident.incidentType || incident.incident_type || 'other';
+        const existing = groupedHotspots.get(key);
+        if (existing) {
+          existing.count += 1;
+          existing.incidentTypes = Array.from(new Set([...existing.incidentTypes, incidentType]));
+          return;
+        }
+
+        groupedHotspots.set(key, {
+          latitude: roundedLatitude,
+          longitude: roundedLongitude,
+          count: 1,
+          incidentTypes: [incidentType],
+        });
+      });
+
+      setHotspots(Array.from(groupedHotspots.values()).filter((hotspot) => hotspot.count >= 3));
     } catch (error) {
       console.error('Error loading hotspots:', error);
     } finally {
@@ -133,7 +167,7 @@ export default function ProfileScreen() {
                   </Text>
                 </View>
                 <View style={styles.hotspotTypes}>
-                  {hotspot.incident_types.map((type, idx) => (
+                  {hotspot.incidentTypes.map((type, idx) => (
                     <View key={idx} style={styles.typeTag}>
                       <Text style={styles.typeTagText}>{type}</Text>
                     </View>

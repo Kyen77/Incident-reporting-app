@@ -1,7 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from "react";
-import { initializeApp } from "firebase/app";
 import {
-  getAuth,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
@@ -9,21 +7,11 @@ import {
   User,
   GoogleAuthProvider,
   signInWithPopup,
+  updateProfile,
 } from "firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { loginUser, registerUser } from "../services/api";
-
-const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+import { loginUser } from "../services/api";
+import { auth } from "../services/firebase";
 
 interface AuthContextType {
   user: User | null;
@@ -58,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           await AsyncStorage.setItem("authToken", token);
           await loginUser(token);
         } catch (error) {
-          console.error("Error storing auth token:", error);
+          console.error("Error storing auth token or initializing user:", error);
         }
       } else {
         await AsyncStorage.removeItem("authToken");
@@ -67,22 +55,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
     return unsubscribe;
   }, []);
-
-  const registerUserInBackend = async (firebaseUser: User) => {
-    try {
-      const response = await registerUser({
-        firebase_uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        display_name: firebaseUser.displayName,
-      });
-
-      if (!response.ok) {
-        console.error("Failed to register user in backend");
-      }
-    } catch (error) {
-      console.error("Error registering user:", error);
-    }
-  };
 
   const signUp = async (
     email: string,
@@ -95,7 +67,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         email,
         password,
       );
-      await registerUserInBackend(userCredential.user);
+      // Update profile with display name
+      await updateProfile(userCredential.user, { displayName });
     } catch (error: any) {
       throw new Error(error.message);
     }
@@ -109,6 +82,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         password,
       );
       const token = await userCredential.user.getIdToken();
+      // Ensure user is in Firestore
       await loginUser(token);
     } catch (error: any) {
       throw new Error(error.message);

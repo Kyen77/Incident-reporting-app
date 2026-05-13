@@ -14,17 +14,19 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
-import { BACKEND_URL, reportEmergencyIncident } from '../../services/api';
+import { subscribeToIncidents, createEmergencyIncident, getIncidents } from '../../services/api';
 
 interface Incident {
   id: string;
-  incident_type: string;
+  incidentType?: string;
+  incident_type?: string;
   description: string;
   latitude: number;
   longitude: number;
   severity: string;
   status: string;
-  created_at: string;
+  createdAt?: any;
+  created_at?: any;
 }
 
 export default function MapScreen() {
@@ -33,101 +35,57 @@ export default function MapScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [sosSubmitting, setSosSubmitting] = useState(false);
-  const { getIdToken } = useAuth();
+  const { user } = useAuth();
+  const { location, requestLocation } = useLocation();
 
   // To avoid unused variable warning, define a function to select an incident
   const handleSelectIncident = (incident: Incident) => {
     setSelectedIncident(incident);
     openInMaps(incident.latitude, incident.longitude);
   };
-  const { location, requestLocation } = useLocation();
 
   useEffect(() => {
-    const fetchIncidents = async (showLoading = true) => {
-      try {
-        if (showLoading) setLoading(true);
-        const token = await getIdToken();
-
-        const url = location
-          ? `${BACKEND_URL}/api/incidents?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=10000`
-          : `${BACKEND_URL}/api/incidents`;
-
-        const response = await fetch(url, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setIncidents(data);
-        }
-      } catch (error) {
-        console.error('Error loading incidents:', error);
-      } finally {
-        if (showLoading) setLoading(false);
-      }
-    };
-
-    fetchIncidents();
-  }, [location, getIdToken]);
-
-  useEffect(() => {
-    const wsBaseUrl = BACKEND_URL.replace(/^http/, 'ws');
-    const ws = new WebSocket(`${wsBaseUrl}/api/ws`);
-
-    ws.onopen = () => {
-      ws.send('client_connected');
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        if (payload?.type === 'new_incident' && payload?.data) {
-          setIncidents((prev) => [payload.data, ...prev]);
-          Alert.alert(
-            '🚨 New Incident Nearby',
-            `${payload.data.incident_type.toUpperCase()} reported in your area`,
-            [{ text: 'OK' }]
-          );
-        }
-      } catch (error) {
-        console.warn('WebSocket message parse error:', error);
-      }
-    };
-
-    ws.onerror = (event) => {
-      console.warn('WebSocket error:', event);
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-    };
-
-    return () => ws.close();
-  }, []); // Only setup websocket once
+    setLoading(true);
+    
+    if (location) {
+      // Subscribe to real-time incident updates
+      const unsubscribe = subscribeToIncidents(
+        location.coords.latitude,
+        location.coords.longitude,
+        10, // 10km radius
+        (updatedIncidents: any[]) => {
+          setIncidents(updatedIncidents);
+          setLoading(false);
+        },
+        () => {
+          setIncidents([]);
+          setLoading(false);
+        },
+      );
+      
+      return () => unsubscribe();
+    } else {
+      setLoading(false);
+    }
+  }, [location]);
 
   const onRefresh = async () => {
     setRefreshing(true);
+
     try {
-      const token = await getIdToken();
-      const url = location
-        ? `${BACKEND_URL}/api/incidents?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=10000`
-        : `${BACKEND_URL}/api/incidents`;
-
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setIncidents(data);
+      if (location) {
+        const freshIncidents = await getIncidents(
+          location.coords.latitude,
+          location.coords.longitude,
+          10,
+        );
+        setIncidents(freshIncidents);
       }
     } catch (error) {
-      console.error('Error loading incidents:', error);
+      console.error('Error refreshing incidents:', error);
+    } finally {
+      setRefreshing(false);
     }
-    await requestLocation();
-    setRefreshing(false);
   };
 
   const getSeverityColor = (severity: string) => {
@@ -145,6 +103,17 @@ export default function MapScreen() {
     }
   };
 
+  const getIncidentType = (incident: Incident) => {
+    return incident.incidentType || incident.incident_type || 'other';
+  };
+
+  const formatIncidentTime = (timestamp: any) => {
+    if (!timestamp) return 'Unknown time';
+    const date = typeof timestamp?.toDate === 'function' ? timestamp.toDate() : new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return 'Unknown time';
+    return date.toLocaleString();
+  };
+
   const getIncidentIcon = (type: string): any => {
     switch (type) {
       case 'sos':
@@ -158,7 +127,7 @@ export default function MapScreen() {
       case 'assault':
         return 'warning';
       case 'accident':
-        return 'car-crash';
+        return 'warning';
       default:
         return 'alert-circle';
     }
@@ -187,34 +156,34 @@ export default function MapScreen() {
       return;
     }
 
-    const token = await getIdToken();
-    if (!token) {
+    if (!user) {
       Alert.alert('Error', 'You must be signed in to send an SOS alert.');
       return;
     }
 
     try {
       setSosSubmitting(true);
-      const response = await reportEmergencyIncident(token, {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        description: 'Emergency SOS triggered',
-      });
+      
+      // Create emergency incident
+      const result = await createEmergencyIncident(
+        user.uid,
+        location.coords.latitude,
+        location.coords.longitude,
+        'Emergency SOS triggered'
+      );
 
-      if (response.ok) {
-        const data = await response.json();
+      if (result.ok) {
         Alert.alert(
           'SOS Sent',
-          `Emergency alert sent. ${data.nearby_users_notified} nearby users notified.`,
+          'Emergency alert sent. Nearby users have been notified.',
           [{ text: 'OK' }]
         );
       } else {
-        const error = await response.json();
-        Alert.alert('Error', error.detail || 'Failed to send SOS alert');
+        Alert.alert('Error', result.message || 'Failed to send SOS alert');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending SOS alert:', error);
-      Alert.alert('Error', 'Failed to send SOS alert. Please try again.');
+      Alert.alert('Error', error.message || 'Failed to send SOS alert. Please try again.');
     } finally {
       setSosSubmitting(false);
     }
@@ -284,7 +253,7 @@ export default function MapScreen() {
               ]}
             >
               <Ionicons
-                name={getIncidentIcon(incident.incident_type)}
+                name={getIncidentIcon(getIncidentType(incident))}
                 size={12}
                 color="#fff"
               />
@@ -347,7 +316,7 @@ export default function MapScreen() {
                 ]}
               >
                 <Ionicons
-                  name={getIncidentIcon(incident.incident_type)}
+                  name={getIncidentIcon(getIncidentType(incident))}
                   size={24}
                   color="#fff"
                 />
@@ -355,7 +324,7 @@ export default function MapScreen() {
               <View style={styles.incidentContent}>
                 <View style={styles.incidentHeader}>
                   <Text style={styles.incidentType}>
-                    {incident.incident_type.toUpperCase()}
+                    {getIncidentType(incident).toUpperCase()}
                   </Text>
                   <Text
                     style={[
@@ -371,7 +340,7 @@ export default function MapScreen() {
                 </Text>
                 <View style={styles.incidentFooter}>
                   <Text style={styles.incidentTime}>
-                    {new Date(incident.created_at).toLocaleString()}
+                    {formatIncidentTime(incident.createdAt || incident.created_at)}
                   </Text>
                   <View style={styles.locationLink}>
                     <Ionicons name="location" size={14} color="#4A90E2" />

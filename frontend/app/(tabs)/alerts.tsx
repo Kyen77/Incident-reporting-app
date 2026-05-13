@@ -11,97 +11,104 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
-import * as Notifications from 'expo-notifications';
-import { BACKEND_URL } from '../../services/api';
+import { subscribeToIncidents, updateUserLocation } from '../../services/api';
+import { getNearbyIncidents } from '../../services/api';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../../services/firebase';
+
+const Notifications =
+  Platform.OS === 'web' ? null : require('expo-notifications');
 
 interface Incident {
   id: string;
-  incident_type: string;
+  incidentType?: string;
+  incident_type?: string;
   description: string;
   latitude: number;
   longitude: number;
   severity: string;
-  created_at: string;
+  createdAt?: any;
+  created_at?: any;
 }
 
-// Configure notification handler
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+if (Notifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+}
 
 export default function AlertsScreen() {
   const [nearbyIncidents, setNearbyIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [notificationToken, setNotificationToken] = useState<string | null>(null);
-  const { getIdToken } = useAuth();
-  const { location } = useLocation();
+  const { user } = useAuth();
+  const { location, requestLocation } = useLocation();
 
-
-  const fetchNearbyIncidentsFn = async (showLoading = true) => {
+  const fetchNearbyIncidents = async (showLoading = true) => {
     if (!location) {
-      if (showLoading) setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
+      setNearbyIncidents([]);
       return;
     }
 
     try {
-      if (showLoading) setLoading(true);
-      const token = await getIdToken();
+      if (showLoading) {
+        setLoading(true);
+      }
 
-      const response = await fetch(
-        `${BACKEND_URL}/api/incidents/nearby?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=5000`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
+      const incidents = await getNearbyIncidents(
+        location.coords.latitude,
+        location.coords.longitude,
+        5,
       );
 
-      if (response.ok) {
-        const data = await response.json();
-        setNearbyIncidents(data);
+      if (Array.isArray(incidents)) {
+        setNearbyIncidents(incidents);
       }
     } catch (error) {
       console.error('Error loading nearby incidents:', error);
     } finally {
-      if (showLoading) setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    const fetchNearbyIncidents = async (showLoading = true) => {
-      if (!location) {
-        if (showLoading) setLoading(false);
-        return;
-      }
+    if (!location) {
+      setLoading(false);
+      return;
+    }
 
-      try {
-        if (showLoading) setLoading(true);
-        const token = await getIdToken();
+    // Subscribe to real-time nearby incidents
+    const unsubscribe = subscribeToIncidents(
+      location.coords.latitude,
+      location.coords.longitude,
+      5, // 5km radius
+      (incidents: any[]) => {
+        setNearbyIncidents(incidents);
+        setLoading(false);
+      },
+      () => {
+        setNearbyIncidents([]);
+        setLoading(false);
+      },
+    );
 
-        const response = await fetch(
-          `${BACKEND_URL}/api/incidents/nearby?latitude=${location.coords.latitude}&longitude=${location.coords.longitude}&radius=5000`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+    return () => unsubscribe();
+  }, [location]);
 
-        if (response.ok) {
-          const data = await response.json();
-          setNearbyIncidents(data);
-        }
-      } catch (error) {
-        console.error('Error loading nearby incidents:', error);
-      } finally {
-        if (showLoading) setLoading(false);
-      }
-    };
+  useEffect(() => {
+    if (!Notifications) {
+      return;
+    }
 
     const setupNotifications = async () => {
       try {
@@ -124,20 +131,13 @@ export default function AlertsScreen() {
         console.log('Expo Push Token:', token);
 
         // Send token to backend
-        if (location) {
-          const authToken = await getIdToken();
-          await fetch(`${BACKEND_URL}/api/user/location`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${authToken}`,
-            },
-            body: JSON.stringify({
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-              fcm_token: token,
-            }),
-          });
+        if (location && user) {
+          await updateUserLocation(
+            user.uid,
+            location.coords.latitude,
+            location.coords.longitude,
+            token
+          );
         }
 
         // Configure notification channel for Android
@@ -154,21 +154,30 @@ export default function AlertsScreen() {
       }
     };
 
-    setupNotifications();
-    fetchNearbyIncidents();
-
-    // Listen for notifications
-    const subscription = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('Notification received:', notification);
-      fetchNearbyIncidents();
+    const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        setupNotifications();
+        fetchNearbyIncidents();
+      }
     });
 
-    return () => subscription.remove();
-  }, [location, getIdToken]);
+    // Listen for notifications
+    const subscription = Notifications.addNotificationReceivedListener((notification: any) => {
+      console.log('Notification received:', notification);
+      if (auth.currentUser) {
+        fetchNearbyIncidents(false);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+      authUnsubscribe();
+    };
+  }, [location, user]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchNearbyIncidentsFn(false);
+    await fetchNearbyIncidents(false);
     setRefreshing(false);
   };
 
@@ -187,6 +196,10 @@ export default function AlertsScreen() {
     }
   };
 
+  const getIncidentType = (incident: Incident) => {
+    return incident.incidentType || incident.incident_type || 'other';
+  };
+
   const getIncidentIcon = (type: string) => {
     switch (type) {
       case 'theft':
@@ -198,16 +211,18 @@ export default function AlertsScreen() {
       case 'assault':
         return 'warning';
       case 'accident':
-        return 'car-crash';
+        return 'warning';
       default:
         return 'alert-circle';
     }
   };
 
-  const getTimeAgo = (dateString: string) => {
+  const getTimeAgo = (timestamp: any) => {
+    if (!timestamp) return 'Just now';
+    const date = typeof timestamp?.toDate === 'function' ? timestamp.toDate() : new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return 'Just now';
     const now = new Date();
-    const past = new Date(dateString);
-    const diffMs = now.getTime() - past.getTime();
+    const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
 
     if (diffMins < 1) return 'Just now';
@@ -275,7 +290,7 @@ export default function AlertsScreen() {
                   ]}
                 >
                   <Ionicons
-                    name={getIncidentIcon(incident.incident_type) as any}
+                    name={getIncidentIcon(getIncidentType(incident)) as any}
                     size={28}
                     color="#fff"
                   />
@@ -283,9 +298,11 @@ export default function AlertsScreen() {
                 <View style={styles.alertContent}>
                   <View style={styles.alertHeader}>
                     <Text style={styles.alertType}>
-                      {incident.incident_type.toUpperCase()}
+                      {getIncidentType(incident).toUpperCase()}
                     </Text>
-                    <Text style={styles.alertTime}>{getTimeAgo(incident.created_at)}</Text>
+                    <Text style={styles.alertTime}>
+                      {getTimeAgo(incident.createdAt || incident.created_at)}
+                    </Text>
                   </View>
                   <Text style={styles.alertDescription} numberOfLines={2}>
                     {incident.description}

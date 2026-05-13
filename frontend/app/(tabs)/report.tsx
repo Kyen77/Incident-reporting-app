@@ -14,7 +14,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLocation } from "../../contexts/LocationContext";
-import { BACKEND_URL } from "../../services/api";
+import {
+  createIncident,
+  createEmergencyIncident,
+  updateUserLocation,
+} from "../../services/api";
 
 const INCIDENT_TYPES = [
   {
@@ -23,7 +27,7 @@ const INCIDENT_TYPES = [
     icon: "alert-circle",
     color: "#11070713",
   },
-  { id: "banditry", label: "Banditry", icon: "mask", color: "#11070713" },
+  { id: "banditry", label: "Banditry", icon: "person", color: "#11070713" },
   { id: "theft", label: "Theft", icon: "bag-remove", color: "#F57C00" },
   { id: "fire", label: "Fire", icon: "flame", color: "#D32F2F" },
   {
@@ -33,7 +37,7 @@ const INCIDENT_TYPES = [
     color: "#C62828",
   },
   { id: "assault", label: "Assault", icon: "warning", color: "#E65100" },
-  { id: "accident", label: "Accident", icon: "car-crash", color: "#F57C00" },
+  { id: "accident", label: "Accident", icon: "warning", color: "#F57C00" },
   { id: "other", label: "Other", icon: "alert-circle", color: "#757575" },
 ];
 
@@ -49,7 +53,8 @@ export default function ReportScreen() {
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState("medium");
   const [loading, setLoading] = useState(false);
-  const { getIdToken } = useAuth();
+  const [sosLoading, setSosLoading] = useState(false);
+  const { user } = useAuth();
   const { location, requestLocation, loading: locationLoading } = useLocation();
 
   const handleSubmit = async () => {
@@ -74,42 +79,27 @@ export default function ReportScreen() {
 
     try {
       setLoading(true);
-      const token = await getIdToken();
+      if (!user) {
+        Alert.alert("Error", "You must be signed in to report an incident");
+        return;
+      }
 
       // Update user location first
-      await fetch(`${BACKEND_URL}/api/user/location`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        }),
-      });
+      await updateUserLocation(user.uid, location.coords.latitude, location.coords.longitude);
 
       // Report incident
-      const response = await fetch(`${BACKEND_URL}/api/incidents`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          incident_type: selectedType,
-          description: description.trim(),
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          severity,
-        }),
+      const result = await createIncident(user.uid, {
+        incident_type: selectedType,
+        description: description.trim(),
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        severity,
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (result.ok) {
         Alert.alert(
           "Success",
-          `Incident reported successfully! ${data.nearby_users_notified} nearby users notified.`,
+          "Incident reported successfully! Nearby users have been notified.",
           [
             {
               text: "OK",
@@ -122,14 +112,58 @@ export default function ReportScreen() {
           ],
         );
       } else {
-        const error = await response.json();
-        Alert.alert("Error", error.detail || "Failed to report incident");
+        Alert.alert("Error", result.message || "Failed to report incident");
       }
     } catch (error: any) {
       console.error("Error reporting incident:", error);
-      Alert.alert("Error", "Failed to report incident. Please try again.");
+      Alert.alert("Error", error.message || "Failed to report incident. Please try again.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSos = async () => {
+    if (sosLoading) return;
+
+    if (!location) {
+      Alert.alert(
+        "Error",
+        "Location is required. Please enable location services.",
+      );
+      await requestLocation();
+      return;
+    }
+
+    if (!user) {
+      Alert.alert("Error", "You must be signed in to send an SOS alert");
+      return;
+    }
+
+    try {
+      setSosLoading(true);
+      const result = await createEmergencyIncident(
+        user.uid,
+        location.coords.latitude,
+        location.coords.longitude,
+        "Emergency SOS triggered",
+      );
+
+      if (result.ok) {
+        Alert.alert(
+          "SOS Sent",
+          "Emergency alert sent. Nearby users have been notified.",
+        );
+      } else {
+        Alert.alert("Error", result.message || "Failed to send SOS alert");
+      }
+    } catch (error: any) {
+      console.error("Error sending SOS alert:", error);
+      Alert.alert(
+        "Error",
+        error.message || "Failed to send SOS alert. Please try again.",
+      );
+    } finally {
+      setSosLoading(false);
     }
   };
 
@@ -264,20 +298,36 @@ export default function ReportScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.submitButton, loading && styles.submitButtonDisabled]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Ionicons name="send" size={20} color="#fff" />
-              <Text style={styles.submitButtonText}>Submit Report</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        <View style={styles.footerActions}>
+          <TouchableOpacity
+            style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={loading || sosLoading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="send" size={20} color="#fff" />
+                <Text style={styles.submitButtonText}>Submit Report</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.sosButton, sosLoading && styles.sosButtonDisabled]}
+            onPress={handleSos}
+            disabled={loading || sosLoading}
+          >
+            {sosLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="radio-button-on" size={20} color="#fff" />
+                <Text style={styles.sosButtonText}>SOS</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -417,7 +467,12 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#eee",
   },
+  footerActions: {
+    flexDirection: "row",
+    gap: 12,
+  },
   submitButton: {
+    flex: 1,
     backgroundColor: "#4A90E2",
     borderRadius: 12,
     height: 56,
@@ -433,5 +488,23 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 18,
     fontWeight: "600",
+  },
+  sosButton: {
+    width: 92,
+    backgroundColor: "#D32F2F",
+    borderRadius: 12,
+    height: 56,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+  },
+  sosButtonDisabled: {
+    backgroundColor: "#E57373",
+  },
+  sosButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
   },
 });

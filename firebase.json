@@ -1,0 +1,25 @@
+{
+  "projects": {
+    "default": "YOUR_PROJECT_ID"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "functions-debug.log"
+      ]
+    },
+    {
+      "source": "backend",
+      "codebase": "python"
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}
