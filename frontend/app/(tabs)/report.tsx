@@ -85,10 +85,10 @@ export default function ReportScreen() {
       }
 
       // Update user location first
-      await updateUserLocation(user.uid, location.coords.latitude, location.coords.longitude);
+      await updateUserLocation(user.id, location.coords.latitude, location.coords.longitude);
 
       // Report incident
-      const result = await createIncident(user.uid, {
+      const result = await createIncident(user.id, {
         incident_type: selectedType,
         description: description.trim(),
         latitude: location.coords.latitude,
@@ -142,7 +142,7 @@ export default function ReportScreen() {
     try {
       setSosLoading(true);
       const result = await createEmergencyIncident(
-        user.uid,
+        user.id,
         location.coords.latitude,
         location.coords.longitude,
         "Emergency SOS triggered",

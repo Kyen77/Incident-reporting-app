@@ -13,8 +13,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
 import { useRouter } from 'expo-router';
 import { getIncidents } from '../../services/api';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../../services/firebase';
 
 interface Hotspot {
   latitude: number;
@@ -31,13 +29,10 @@ export default function ProfileScreen() {
   const router = useRouter();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        loadHotspots();
-      }
-    });
-    return () => unsubscribe();
-  }, []);
+    if (user) {
+      loadHotspots();
+    }
+  }, [user]);
 
   const loadHotspots = async () => {
     try {

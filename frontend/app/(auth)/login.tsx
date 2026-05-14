@@ -19,7 +19,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn, signInWithGoogle } = useAuth();
+  const { signIn } = useAuth();
   const router = useRouter();
 
   const handleLogin = async () => {
@@ -39,17 +39,6 @@ export default function Login() {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    try {
-      setLoading(true);
-      await signInWithGoogle();
-      router.replace('/(tabs)/map');
-    } catch (error: any) {
-      Alert.alert('Google Sign In Failed', error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <KeyboardAvoidingView
@@ -99,21 +88,6 @@ export default function Login() {
             ) : (
               <Text style={styles.buttonText}>Sign In</Text>
             )}
-          </TouchableOpacity>
-
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <TouchableOpacity
-            style={styles.googleButton}
-            onPress={handleGoogleSignIn}
-            disabled={loading}
-          >
-            <Ionicons name="logo-google" size={20} color="#fff" />
-            <Text style={styles.googleButtonText}>Sign in with Google</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -192,35 +166,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontSize: 18,
-    fontWeight: '600',
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 24,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#ddd',
-  },
-  dividerText: {
-    marginHorizontal: 16,
-    color: '#666',
-    fontSize: 14,
-  },
-  googleButton: {
-    flexDirection: 'row',
-    backgroundColor: '#DB4437',
-    borderRadius: 12,
-    height: 56,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-  },
-  googleButtonText: {
-    color: '#fff',
-    fontSize: 16,
     fontWeight: '600',
   },
   linkButton: {

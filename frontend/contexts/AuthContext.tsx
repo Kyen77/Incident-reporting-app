@@ -1,20 +1,15 @@
-import React, { createContext, useState, useEffect, useContext } from "react";
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  User,
-  GoogleAuthProvider,
-  signInWithPopup,
-  updateProfile,
-} from "firebase/auth";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { loginUser } from "../services/api";
-import { auth } from "../services/firebase";
+import React, { createContext, useState, useEffect, useContext } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getCurrentUser, loginUser, registerUser } from '../services/api';
+
+interface AuthUser {
+  id: string;
+  email: string;
+  displayName?: string | null;
+}
 
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   loading: boolean;
   signUp: (
     email: string,
@@ -22,7 +17,6 @@ interface AuthContextType {
     displayName: string,
   ) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
 }
@@ -32,29 +26,39 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-
-      if (currentUser) {
-        try {
-          const token = await currentUser.getIdToken();
-          await AsyncStorage.setItem("authToken", token);
-          await loginUser(token);
-        } catch (error) {
-          console.error("Error storing auth token or initializing user:", error);
+    const initializeSession = async () => {
+      try {
+        const storedToken = await AsyncStorage.getItem('authToken');
+        if (!storedToken) {
+          setLoading(false);
+          return;
         }
-      } else {
-        await AsyncStorage.removeItem("authToken");
-      }
-    });
 
-    return unsubscribe;
+        setToken(storedToken);
+        const result = await getCurrentUser();
+        setUser(result.user);
+      } catch (error) {
+        await AsyncStorage.removeItem('authToken');
+        setToken(null);
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeSession();
   }, []);
+
+  const setSession = async (authToken: string, userData: AuthUser) => {
+    setToken(authToken);
+    setUser(userData);
+    await AsyncStorage.setItem('authToken', authToken);
+  };
 
   const signUp = async (
     email: string,
@@ -62,13 +66,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     displayName: string,
   ) => {
     try {
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
+      const result = await registerUser({
         email,
         password,
-      );
-      // Update profile with display name
-      await updateProfile(userCredential.user, { displayName });
+        display_name: displayName,
+      });
+
+      if (!result.token || !result.user) {
+        throw new Error('Registration failed');
+      }
+
+      await setSession(result.token, result.user);
     } catch (error: any) {
       throw new Error(error.message);
     }
@@ -76,23 +84,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const signIn = async (email: string, password: string) => {
     try {
-      const userCredential = await signInWithEmailAndPassword(
-        auth,
-        email,
-        password,
-      );
-      const token = await userCredential.user.getIdToken();
-      // Ensure user is in Firestore
-      await loginUser(token);
-    } catch (error: any) {
-      throw new Error(error.message);
-    }
-  };
+      const result = await loginUser(email, password);
 
-  const signInWithGoogle = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      if (!result.token || !result.user) {
+        throw new Error('Login failed');
+      }
+
+      await setSession(result.token, result.user);
     } catch (error: any) {
       throw new Error(error.message);
     }
@@ -100,18 +98,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const logout = async () => {
     try {
-      await signOut(auth);
-      await AsyncStorage.removeItem("authToken");
+      setUser(null);
+      setToken(null);
+      await AsyncStorage.removeItem('authToken');
     } catch (error: any) {
       throw new Error(error.message);
     }
   };
 
   const getIdToken = async (): Promise<string | null> => {
-    if (user) {
-      return await user.getIdToken();
-    }
-    return null;
+    return token || (await AsyncStorage.getItem('authToken'));
   };
 
   return (
@@ -121,7 +117,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         loading,
         signUp,
         signIn,
-        signInWithGoogle,
         logout,
         getIdToken,
       }}
@@ -138,5 +133,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-export { auth };

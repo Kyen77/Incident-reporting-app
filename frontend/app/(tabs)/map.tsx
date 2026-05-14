@@ -35,7 +35,7 @@ export default function MapScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [sosSubmitting, setSosSubmitting] = useState(false);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { location, requestLocation } = useLocation();
 
   // To avoid unused variable warning, define a function to select an incident
@@ -46,8 +46,8 @@ export default function MapScreen() {
 
   useEffect(() => {
     setLoading(true);
-    
-    if (location) {
+
+    if (location && !authLoading && user) {
       // Subscribe to real-time incident updates
       const unsubscribe = subscribeToIncidents(
         location.coords.latitude,
@@ -64,16 +64,17 @@ export default function MapScreen() {
       );
       
       return () => unsubscribe();
-    } else {
-      setLoading(false);
     }
-  }, [location]);
+
+    setLoading(false);
+    return undefined;
+  }, [location, authLoading, user]);
 
   const onRefresh = async () => {
     setRefreshing(true);
 
     try {
-      if (location) {
+      if (location && !authLoading && user) {
         const freshIncidents = await getIncidents(
           location.coords.latitude,
           location.coords.longitude,
@@ -156,7 +157,7 @@ export default function MapScreen() {
       return;
     }
 
-    if (!user) {
+    if (!user || authLoading) {
       Alert.alert('Error', 'You must be signed in to send an SOS alert.');
       return;
     }
@@ -166,7 +167,7 @@ export default function MapScreen() {
       
       // Create emergency incident
       const result = await createEmergencyIncident(
-        user.uid,
+        user.id,
         location.coords.latitude,
         location.coords.longitude,
         'Emergency SOS triggered'

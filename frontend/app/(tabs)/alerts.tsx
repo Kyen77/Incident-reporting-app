@@ -11,10 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
-import { subscribeToIncidents, updateUserLocation } from '../../services/api';
-import { getNearbyIncidents } from '../../services/api';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../../services/firebase';
+import { subscribeToIncidents, updateUserLocation, getNearbyIncidents } from '../../services/api';
 
 const Notifications =
   Platform.OS === 'web' ? null : require('expo-notifications');
@@ -46,11 +43,11 @@ export default function AlertsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [notificationToken, setNotificationToken] = useState<string | null>(null);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { location, requestLocation } = useLocation();
 
   const fetchNearbyIncidents = async (showLoading = true) => {
-    if (!location) {
+    if (authLoading || !user || !location) {
       if (showLoading) {
         setLoading(false);
       }
@@ -82,7 +79,7 @@ export default function AlertsScreen() {
   };
 
   useEffect(() => {
-    if (!location) {
+    if (!location || authLoading || !user) {
       setLoading(false);
       return;
     }
@@ -103,7 +100,7 @@ export default function AlertsScreen() {
     );
 
     return () => unsubscribe();
-  }, [location]);
+  }, [location, authLoading, user]);
 
   useEffect(() => {
     if (!Notifications) {
@@ -131,9 +128,9 @@ export default function AlertsScreen() {
         console.log('Expo Push Token:', token);
 
         // Send token to backend
-        if (location && user) {
+        if (location && user && !authLoading) {
           await updateUserLocation(
-            user.uid,
+            user.id,
             location.coords.latitude,
             location.coords.longitude,
             token
@@ -154,26 +151,23 @@ export default function AlertsScreen() {
       }
     };
 
-    const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        setupNotifications();
-        fetchNearbyIncidents();
-      }
-    });
+    if (!authLoading && user) {
+      setupNotifications();
+      fetchNearbyIncidents();
+    }
 
     // Listen for notifications
     const subscription = Notifications.addNotificationReceivedListener((notification: any) => {
       console.log('Notification received:', notification);
-      if (auth.currentUser) {
+      if (user) {
         fetchNearbyIncidents(false);
       }
     });
 
     return () => {
       subscription.remove();
-      authUnsubscribe();
     };
-  }, [location, user]);
+  }, [location, user, authLoading]);
 
   const onRefresh = async () => {
     setRefreshing(true);
