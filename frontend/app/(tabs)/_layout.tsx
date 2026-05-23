@@ -1,49 +1,49 @@
-import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Tabs } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 
 export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#4A90E2',
-        tabBarInactiveTintColor: '#999',
+        tabBarActiveTintColor: "#4A90E2",
+        tabBarInactiveTintColor: "#999",
         tabBarStyle: {
-          backgroundColor: '#fff',
+          backgroundColor: "#fff",
           borderTopWidth: 1,
-          borderTopColor: '#eee',
+          borderTopColor: "#eee",
           height: 60,
           paddingBottom: 8,
           paddingTop: 8,
         },
         tabBarLabelStyle: {
           fontSize: 12,
-          fontWeight: '600',
+          fontWeight: "600",
         },
       }}
     >
       <Tabs.Screen
-        name="map"
-        options={{
-          title: 'Map',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="map" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="report"
         options={{
-          title: 'Report',
+          title: "Report",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="alert-circle" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
+        name="map"
+        options={{
+          title: "Map",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="map" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="alerts"
         options={{
-          title: 'Alerts',
+          title: "Alerts",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="notifications" size={size} color={color} />
           ),
@@ -52,7 +52,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
+          title: "Profile",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={size} color={color} />
           ),

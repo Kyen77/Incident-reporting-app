@@ -24,10 +24,15 @@ const INCIDENT_TYPES = [
   {
     id: "armed robbery",
     label: "Armed Robbery",
-    icon: "alert-circle",
-    color: "#11070713",
+    icon: "Alert-outline",
+    color: "#110707f3",
   },
-  { id: "banditry", label: "Banditry", icon: "person", color: "#11070713" },
+  {
+    id: "banditry",
+    label: "Banditry",
+    icon: "skull-outline",
+    color: "#110707f1",
+  },
   { id: "theft", label: "Theft", icon: "bag-remove", color: "#F57C00" },
   { id: "fire", label: "Fire", icon: "flame", color: "#D32F2F" },
   {
@@ -37,7 +42,7 @@ const INCIDENT_TYPES = [
     color: "#C62828",
   },
   { id: "assault", label: "Assault", icon: "warning", color: "#E65100" },
-  { id: "accident", label: "Accident", icon: "warning", color: "#F57C00" },
+  { id: "accident", label: "Accident", icon: "car-outline", color: "#F57C00" },
   { id: "other", label: "Other", icon: "alert-circle", color: "#757575" },
 ];
 
@@ -85,7 +90,11 @@ export default function ReportScreen() {
       }
 
       // Update user location first
-      await updateUserLocation(user.id, location.coords.latitude, location.coords.longitude);
+      await updateUserLocation(
+        user.id,
+        location.coords.latitude,
+        location.coords.longitude,
+      );
 
       // Report incident
       const result = await createIncident(user.id, {
@@ -116,7 +125,10 @@ export default function ReportScreen() {
       }
     } catch (error: any) {
       console.error("Error reporting incident:", error);
-      Alert.alert("Error", error.message || "Failed to report incident. Please try again.");
+      Alert.alert(
+        "Error",
+        error.message || "Failed to report incident. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -300,7 +312,10 @@ export default function ReportScreen() {
       <View style={styles.footer}>
         <View style={styles.footerActions}>
           <TouchableOpacity
-            style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+            style={[
+              styles.submitButton,
+              loading && styles.submitButtonDisabled,
+            ]}
             onPress={handleSubmit}
             disabled={loading || sosLoading}
           >
